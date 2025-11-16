@@ -32,6 +32,7 @@ class PostgresSearcher(Searcher):
             self.conn = psycopg2.connect(dsn=os.environ["TIMESCALE_SERVICE_URL"])
             cur = self.conn.cursor()
             cur.execute("CREATE EXTENSION IF NOT EXISTS pg_textsearch;")
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE;")
         else:
             self.conn = psycopg2.connect(dbname=db_name, user=user)
 
