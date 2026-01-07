@@ -110,70 +110,62 @@ class PostgresSearcher(Searcher):
             else table_names[0]
         )
         cur = self.conn.cursor()
+
+        params = {
+            "vector": query_embedding,
+            "n": top_n,
+            "k": k,
+            "w_sem": weight_semantic,
+            "w_key": weight_keyword,
+        }
+
+        vector_cte = f"""
+            SELECT id,
+                RANK() OVER (ORDER BY embedding <=> %(vector)s::vector) AS rank
+            FROM "{dense_table}"
+            ORDER BY rank
+            LIMIT %(n)s
+        """
+
         if self.use_pg_textsearch:
             idx_name = BM25_INDEX_TEMPLATE.format(table_name=sparse_table)
-            query_sql = f"""
-                        WITH vector_search AS (
-                            SELECT id,
-                                ROW_NUMBER() OVER (ORDER BY embedding <=> %(vector)s::vector) AS rank
-                            FROM "{dense_table}"
-                            ORDER BY embedding <=> %(vector)s::vector
-                            LIMIT %(n)s
-                        ),
-                        keyword_search AS (
-                            SELECT id,
-                                ROW_NUMBER() OVER (
-                                    ORDER BY contents <@> to_bm25query(%(q)s, %(idx)s)
-                                ) AS rank
-                            FROM "{sparse_table}"
-                            ORDER BY contents <@> to_bm25query(%(q)s, %(idx)s)
-                            LIMIT %(n)s
-                        )
-                        SELECT COALESCE(v.id, k.id) AS id,
-                            %(w_sem)s * COALESCE(1.0 / (%(k)s + v.rank), 0.0) +
-                            %(w_key)s * COALESCE(1.0 / (%(k)s + k.rank), 0.0) AS score
-                        FROM vector_search v
-                        FULL OUTER JOIN keyword_search k ON v.id = k.id
-                        ORDER BY score DESC
-                        LIMIT %(n)s
-                        """
-            cur.execute(
-                query_sql,
-                {
-                    "q": query_string,
-                    "vector": query_embedding,
-                    "n": top_n,
-                    "k": k,
-                    "idx": idx_name,
-                    "w_sem": weight_semantic,
-                    "w_key": weight_keyword,
-                },
-            )
+            params.update({"q": query_string, "idx": idx_name})
+            keyword_cte = f"""
+                SELECT id,
+                    RANK() OVER (
+                        ORDER BY contents <@> to_bm25query(%(q)s, %(idx)s)
+                    ) AS rank
+                FROM "{sparse_table}"
+                ORDER BY rank
+                LIMIT %(n)s
+            """
         else:
             ts_query = self.clean_tsquery(query_string)
-            query_sql = f"""
-                        WITH semantic_search AS (
-                                SELECT id, RANK () OVER (ORDER BY embedding <=> %(vector)s::vector) AS rank
-                                FROM {dense_table}
-                                LIMIT %(n)s
-                        ),
-                        keyword_search AS (
-                                SELECT id, RANK () OVER (ORDER BY ts_rank(to_tsvector('simple', contents), query) DESC) as rank
-                                FROM {sparse_table}, to_tsquery('simple', %(query)s) query
-                                WHERE to_tsvector('simple', contents) @@ query
-                                LIMIT %(n)s
-                        )
-                        SELECT
-                            COALESCE(semantic_search.id, keyword_search.id) AS id,
-                            %(w_sem)s * COALESCE(1.0 / (%(k)s + semantic_search.rank), 0.0) +
-                            %(w_key)s * COALESCE(1.0 / (%(k)s + keyword_search.rank), 0.0) AS score
-                        FROM semantic_search
-                        FULL OUTER JOIN keyword_search ON semantic_search.id = keyword_search.id
-                        ORDER BY score DESC
-                        LIMIT %(n)s
-                        """
-            cur.execute(
-                query_sql,
-                {"query": ts_query, "vector": query_embedding, "n": top_n, "k": k, "w_sem": weight_semantic, "w_key": weight_keyword},
+            params["q"] = ts_query
+            keyword_cte = f"""
+                SELECT id,
+                    RANK() OVER (ORDER BY ts_rank(to_tsvector('simple', contents), query) DESC) as rank
+                FROM "{sparse_table}", to_tsquery('simple', %(q)s) query
+                WHERE to_tsvector('simple', contents) @@ query
+                ORDER BY rank
+                LIMIT %(n)s
+            """
+
+        query_sql = f"""
+            WITH vector_search AS (
+                {vector_cte}
+            ),
+            keyword_search AS (
+                {keyword_cte}
             )
+            SELECT COALESCE(v.id, k.id) AS id,
+                %(w_sem)s * COALESCE(1.0 / (%(k)s + v.rank), 0.0) +
+                %(w_key)s * COALESCE(1.0 / (%(k)s + k.rank), 0.0) AS score
+            FROM vector_search v
+            FULL OUTER JOIN keyword_search k ON v.id = k.id
+            ORDER BY score DESC
+            LIMIT %(n)s
+        """
+
+        cur.execute(query_sql, params)
         return cur.fetchall()

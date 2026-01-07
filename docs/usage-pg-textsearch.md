@@ -1,8 +1,9 @@
 # Using Timescale pg_textsearch (BM25) with QuackIR
 
-This guide shows how to run BM25 keyword search in PostgreSQL/Timescale using the pg_textsearch extension, integrated into QuackIR’s Postgres back end.
+This guide shows how to run BM25 keyword search in PostgreSQL/Timescale using the `pg_textsearch` extension, integrated into QuackIR’s Postgres back end.
 
-Note: This guide assumes you have already preprocessed NFCorpus as in the experiments guide (both sparse text and dense embeddings). See: [experiments-nfcorpus.md](./experiments-nfcorpus.md). If not, please follow that first.
+Note: This guide assumes you have already preprocessed NFCorpus as in the experiments guide (both sparse text and dense embeddings).
+See [experiments-nfcorpus.md](./experiments-nfcorpus.md). If not, please follow that first.
 
 ## Prerequisites
 
@@ -11,13 +12,12 @@ Note: This guide assumes you have already preprocessed NFCorpus as in the experi
 3. At the root of this repo, create a `.env` file with your Timescale DSN (service URL):
 
 ```
-# .env
 TIMESCALE_SERVICE_URL=postgresql://<USER>:<PASSWORD>@<HOST>:<PORT>/<DBNAME>?sslmode=require
 ```
 
 ## Indexing with BM25
 
-- `use_pg_textsearch=True` switches QuackIR to use Timescale’s pg_textsearch BM25 index instead of Postgres GIN/tsvector.
+- `use_pg_textsearch=True` switches QuackIR to use Timescale’s `pg_textsearch` BM25 index instead of Postgres GIN/tsvector.
 - You can tune BM25 via `k1` (term frequency saturation) and `b` (length normalization).
 
 ```python
@@ -31,15 +31,14 @@ corpus_file = "collections/nfcorpus/quackir_corpus.jsonl"
 indexer = PostgresIndexer(use_pg_textsearch=True)
 indexer.init_table(table_name, index_type)
 indexer.load_table(table_name, corpus_file, pretokenized=True)
-indexer.fts_index(table_name, k1=1.5, b=0.8)
+indexer.fts_index(table_name, k1=0.9, b=0.4)
 
 indexer.close()
 ```
 
 ## Searching with BM25
 
-- When `use_pg_textsearch=True`, QuackIR runs pg_textsearch BM25 queries via the distance operator `<@>` and `to_bm25query(...)`.
-- BM25 scores from pg_textsearch are negative; more negative means better match. We often reverse the sign for evaluation tooling that expects higher-is-better.
+- When `use_pg_textsearch=True`, QuackIR runs `pg_textsearch` BM25 queries via the distance operator `<@>` and `to_bm25query(...)`.
 
 ```python
 from quackir.search import PostgresSearcher
@@ -73,8 +72,10 @@ with pathlib.Path("runs/run.quackir.postgres.sparse.pg_textsearch.nfcorpus.txt")
 searcher.close()
 ```
 
-### Why reverse the score?
-pg_textsearch returns BM25 scores as negative values so that lower (more negative) is better. This choice aligns naturally with Postgres’s default ascending order for distance/score operations. If your downstream code or evaluation expects larger scores to indicate better matches, simply flip the sign when writing results as shown above.
+### Why negate the score?
+`pg_textsearch` returns BM25 scores as negative values so that lower (more negative) is better.
+This choice aligns naturally with Postgres’s default ascending order for distance/score operations.
+If your downstream code or evaluation expects larger scores to indicate better matches, simply flip the sign when writing results as shown above.
 
 ## Evaluating results
 
@@ -89,12 +90,12 @@ python -m pyserini.eval.trec_eval \
 which should yield:
 
 ```
-ndcg_cut_10             all     0.3098
+ndcg_cut_10             all     0.3084
 ```
 
 ## Optional: Hybrid search (BM25 + embeddings)
 
-The following script demonstrates hybrid search that fuses BM25 (pg_textsearch) with dense vector similarity using RRF.
+The following script demonstrates hybrid search that fuses BM25 (`pg_textsearch`) with dense vector similarity using RRF.
 
 ```python
 from quackir.index import PostgresIndexer
@@ -121,7 +122,7 @@ indexer.init_table(dense_table_name, IndexType.DENSE, embedding_dim=embedding_di
 indexer.load_table(dense_table_name, embedding_file, IndexType.DENSE)
 
 indexer.fts_index(sparse_table_name, text_config="english")
-indexer.vector_index(
+indexer.embedding_index(
     dense_table_name, using="hnsw", opclass="vector_cosine_ops", column="embedding"
 )
 
@@ -172,3 +173,25 @@ python -m pyserini.eval.trec_eval \
   -c -m ndcg_cut.10 collections/nfcorpus/qrels/test.qrels \
   runs/run.quackir.postgres.hybrid.pg_textsearch.nfcorpus.txt
 ```
+
+which should yield:
+
+```
+ndcg_cut_10             all     0.3730
+```
+
+which is a 0.0646 (~21%) improvement over the sparse-only baseline of 0.3084,
+and relatively close to the 0.3808 reported in [Pyserini's NFCorpus experiments](https://github.com/castorini/pyserini/blob/master/docs/experiments-nfcorpus.md#evaluation).
+
+## Comparison
+
+We can perform a sparse search using the default Postgres GIN/tsvector indexing by omitting the `use_pg_textsearch=True` flag.
+You can do this on your own and evaluate the results similarly.
+We then compare all the results as below:
+
+| Method | System | Score (NDCG@10) |
+| :--- | :--- | :--- |
+| Sparse (GIN/tsvector) | Postgres | 0.1989 |
+| Sparse (BM25) | pg_textsearch (extension) | 0.3084 |
+| Hybrid (BM25 + Dense) | pg_textsearch (extension) | 0.3730 |
+

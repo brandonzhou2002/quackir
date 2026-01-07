@@ -1,6 +1,5 @@
 import os
-from dotenv import load_dotenv
+from quackir._base import load_env
 
 if not os.getenv("_ENV_LOADED"):
-    load_dotenv()
-    os.environ["_ENV_LOADED"] = "1"
+    load_env()

@@ -99,8 +99,8 @@ class PostgresIndexer(Indexer):
         self,
         table_name: str = "corpus",
         text_config: str = "english",
-        k1: float = 1.5,
-        b: float = 0.8,
+        k1: float = 0.9,
+        b: float = 0.4,
     ):
         cur = self.conn.cursor()
         if self.use_pg_textsearch:
@@ -121,7 +121,7 @@ class PostgresIndexer(Indexer):
             )
         self.conn.commit()
 
-    def vector_index(
+    def embedding_index(
         self,
         table_name: str,
         using: str = "hnsw",
