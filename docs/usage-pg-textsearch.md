@@ -177,11 +177,8 @@ python -m pyserini.eval.trec_eval \
 which should yield:
 
 ```
-ndcg_cut_10             all     0.3730
+ndcg_cut_10             all     0.3718
 ```
-
-which is a 0.0646 (~21%) improvement over the sparse-only baseline of 0.3084,
-and relatively close to the 0.3808 reported in [Pyserini's NFCorpus experiments](https://github.com/castorini/pyserini/blob/master/docs/experiments-nfcorpus.md#evaluation).
 
 ## Comparison
 
@@ -193,5 +190,5 @@ We then compare all the results as below:
 | :--- | :--- | :--- |
 | Sparse (GIN/tsvector) | Postgres | 0.1989 |
 | Sparse (BM25) | pg_textsearch (extension) | 0.3084 |
-| Hybrid (BM25 + Dense) | pg_textsearch (extension) | 0.3730 |
+| Hybrid (BM25 + Dense) | pg_textsearch (extension) | 0.3718 |
 

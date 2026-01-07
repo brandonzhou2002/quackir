@@ -121,7 +121,7 @@ class PostgresSearcher(Searcher):
 
         vector_cte = f"""
             SELECT id,
-                RANK() OVER (ORDER BY embedding <=> %(vector)s::vector) AS rank
+                ROW_NUMBER() OVER (ORDER BY embedding <=> %(vector)s::vector, id) AS rank
             FROM "{dense_table}"
             ORDER BY rank
             LIMIT %(n)s
@@ -132,8 +132,8 @@ class PostgresSearcher(Searcher):
             params.update({"q": query_string, "idx": idx_name})
             keyword_cte = f"""
                 SELECT id,
-                    RANK() OVER (
-                        ORDER BY contents <@> to_bm25query(%(q)s, %(idx)s)
+                    ROW_NUMBER() OVER (
+                        ORDER BY contents <@> to_bm25query(%(q)s, %(idx)s), id
                     ) AS rank
                 FROM "{sparse_table}"
                 ORDER BY rank
@@ -144,7 +144,7 @@ class PostgresSearcher(Searcher):
             params["q"] = ts_query
             keyword_cte = f"""
                 SELECT id,
-                    RANK() OVER (ORDER BY ts_rank(to_tsvector('simple', contents), query) DESC) as rank
+                    ROW_NUMBER() OVER (ORDER BY ts_rank(to_tsvector('simple', contents), query) DESC, id) as rank
                 FROM "{sparse_table}", to_tsquery('simple', %(q)s) query
                 WHERE to_tsvector('simple', contents) @@ query
                 ORDER BY rank
