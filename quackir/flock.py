@@ -134,7 +134,8 @@ class FlockManager:
             )
         except Exception as e:
             msg = str(e)
-            if skip_if_exists and ("Duplicate key" in msg or "already exists" in msg):
+            # Silently skip if the model alias already exists and skip_if_exists is True
+            if ("Duplicate key" in msg or "already exists" in msg) and skip_if_exists:
                 return
             raise
 
